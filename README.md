@@ -56,7 +56,6 @@ python accesslog_cli.py /path/to/access.log --peak-window-minutes 60
 
 This project utilizes Python's standard library exclusively for maximum portability and zero external dependencies:
 
-```bash
 | Library | Purpose |
 |---------|---------|
 | **argparse** | CLI argument parsing with automatic help documentation and type validation |
@@ -66,7 +65,6 @@ This project utilizes Python's standard library exclusively for maximum portabil
 | **datetime** | Timestamp parsing and time-based analysis for peak detection |
 | **html** | Safe HTML escaping to prevent injection vulnerabilities |
 | **typing** | Type hints for better code clarity and IDE support |
-```
 
 ## Design Highlights
 

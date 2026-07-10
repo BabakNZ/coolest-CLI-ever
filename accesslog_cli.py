@@ -4,6 +4,7 @@ import argparse
 import html
 import json
 from collections import Counter
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable, Iterator
 
@@ -66,6 +67,13 @@ def _extract_hour(timestamp: str) -> str | None:
     return hour
 
 
+def _parse_timestamp(timestamp: str) -> datetime | None:
+    try:
+        return datetime.strptime(timestamp, "%d/%b/%Y:%H:%M:%S %z")
+    except ValueError:
+        return None
+
+
 def _format_endpoint_summary(top_endpoints: list[tuple[str, int]], max_items: int = 3) -> str:
     if not top_endpoints:
         return "none"
@@ -90,6 +98,68 @@ def _build_hourly_heatmap(hourly_requests: list[tuple[str, int]]) -> list[dict[s
 
     return heatmap
 
+
+def _format_window_timestamp(timestamp: datetime | None) -> str:
+    if timestamp is None:
+        return "none"
+
+    return timestamp.strftime("%d/%b/%Y %H:%M:%S %z")
+
+
+def _build_peak_5xx_window(
+    entries: list[dict[str, str]],
+    window_minutes: int,
+) -> dict[str, object]:
+    five_xx_entries: list[dict[str, object]] = []
+    for entry in entries:
+        if not entry.get("status", "").startswith("5"):
+            continue
+
+        timestamp = _parse_timestamp(entry.get("timestamp", ""))
+        if timestamp is None:
+            continue
+
+        five_xx_entries.append(
+            {
+                "timestamp": timestamp,
+                "ip": entry.get("ip", ""),
+                "endpoint": entry.get("endpoint", ""),
+                "status": entry.get("status", ""),
+            }
+        )
+
+    five_xx_entries.sort(key=lambda item: item["timestamp"])
+    window = timedelta(minutes=window_minutes)
+    left = 0
+    best_left = 0
+    best_right = 0
+
+    for right, current in enumerate(five_xx_entries):
+        while left <= right and current["timestamp"] - five_xx_entries[left]["timestamp"] >= window:
+            left += 1
+
+        current_size = right - left + 1
+        best_size = best_right - best_left
+        if current_size > best_size:
+            best_left = left
+            best_right = right + 1
+
+    peak_window_entries = five_xx_entries[best_left:best_right]
+    peak_window_start = peak_window_entries[0]["timestamp"] if peak_window_entries else None
+    peak_window_end = peak_window_entries[-1]["timestamp"] if peak_window_entries else None
+    peak_endpoints = Counter(entry["endpoint"] for entry in peak_window_entries if entry["endpoint"])
+    peak_ips = Counter(entry["ip"] for entry in peak_window_entries if entry["ip"])
+
+    return {
+        "window_minutes": window_minutes,
+        "count": len(peak_window_entries),
+        "start": _format_window_timestamp(peak_window_start),
+        "end": _format_window_timestamp(peak_window_end),
+        "endpoint_breakdown": peak_endpoints.most_common(5),
+        "ip_breakdown": peak_ips.most_common(5),
+        "statuses": Counter(entry["status"] for entry in peak_window_entries),
+    }
+
 def parse_access_log(lines: Iterable[str]) -> Iterator[dict[str, str]]:
     for line in lines:
         entry = _parse_access_log_line(line)
@@ -101,9 +171,11 @@ def basic_report(
     entries: Iterable[dict[str, str]],
     top_n: int = 10,
     broken_lines: int = 0,
+    peak_window_minutes: int = 60,
 ) -> dict[str, object]:
     """Generate a basic report from parsed entries."""
 
+    entries = list(entries)
     total_requests = 0
     unique_ips: set[str] = set()
     endpoint_counter: Counter[str] = Counter()
@@ -143,6 +215,7 @@ def basic_report(
         quietest_hours = []
 
     hourly_heatmap = _build_hourly_heatmap(hourly_requests)
+    peak_5xx_window = _build_peak_5xx_window(entries, peak_window_minutes)
 
     return {
         "total_requests": total_requests,
@@ -155,10 +228,15 @@ def basic_report(
         "hourly_heatmap": hourly_heatmap,
         "busiest_hours": busiest_hours,
         "quietest_hours": quietest_hours,
+        "peak_5xx_window": peak_5xx_window,
     }
 
 
-def analyze_access_log(lines: Iterable[str], top_n: int = 10) -> dict[str, object]:
+def analyze_access_log(
+    lines: Iterable[str],
+    top_n: int = 10,
+    peak_window_minutes: int = 60,
+) -> dict[str, object]:
     entries: list[dict[str, str]] = []
     broken_lines = 0
 
@@ -170,21 +248,27 @@ def analyze_access_log(lines: Iterable[str], top_n: int = 10) -> dict[str, objec
             continue
         entries.append(entry)
 
-    return basic_report(entries, top_n=top_n, broken_lines=broken_lines)
+    return basic_report(entries, top_n=top_n, broken_lines=broken_lines, peak_window_minutes=peak_window_minutes)
 
 
 def _format_report(report: dict[str, object]) -> str:
+    peak_window = report["peak_5xx_window"]
+    endpoint_breakdown = ", ".join(f"{endpoint} ({count})" for endpoint, count in peak_window["endpoint_breakdown"]) if peak_window["endpoint_breakdown"] else "none"
+    ip_breakdown = ", ".join(f"{ip} ({count})" for ip, count in peak_window["ip_breakdown"]) if peak_window["ip_breakdown"] else "none"
     lines = [
         "Access Log Summary",
         "==================",
         f"Requests: {report['total_requests']}   Unique IPs: {report['unique_ips']}   Broken lines: {report['broken_lines']}",
         f"Top endpoints: {_format_endpoint_summary(report['top_endpoints'])}",
         f"Hourly peak: {report['busiest_hours'][0] if report['busiest_hours'] else 'none'}",
+        f"Peak 5xx window ({peak_window['window_minutes']} min): {peak_window['start']} -> {peak_window['end']} ({peak_window['count']} responses)",
     ]
     lines.append(f"Busiest hour(s): {', '.join(report['busiest_hours']) if report['busiest_hours'] else 'none'}")
     lines.append(f"Quietest hour(s): {', '.join(report['quietest_hours']) if report['quietest_hours'] else 'none'}")
     lines.append(f"4xx responses: {report['percent_4xx']:.2f}%")
     lines.append(f"5xx responses: {report['percent_5xx']:.2f}%")
+    lines.append(f"5xx window endpoints: {endpoint_breakdown}")
+    lines.append(f"5xx window IPs: {ip_breakdown}")
     return "\n".join(lines)
 
 
@@ -200,8 +284,11 @@ def _format_percentage(value: float) -> str:
 def _build_html_report(report: dict[str, object]) -> str:
     top_endpoints = report["top_endpoints"]
     hourly_heatmap = report["hourly_heatmap"]
+    peak_window = report["peak_5xx_window"]
     busiest_hours = ", ".join(report["busiest_hours"]) if report["busiest_hours"] else "none"
     quietest_hours = ", ".join(report["quietest_hours"]) if report["quietest_hours"] else "none"
+    peak_endpoints = ", ".join(f"{html.escape(endpoint)} ({count})" for endpoint, count in peak_window["endpoint_breakdown"]) if peak_window["endpoint_breakdown"] else "none"
+    peak_ips = ", ".join(f"{html.escape(ip)} ({count})" for ip, count in peak_window["ip_breakdown"]) if peak_window["ip_breakdown"] else "none"
 
     heatmap_cells = []
     for item in hourly_heatmap:
@@ -289,6 +376,9 @@ def _build_html_report(report: dict[str, object]) -> str:
         .endpoints li:last-child {{ border-bottom: 0; }}
         .endpoint {{ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
         .count {{ color: var(--accent); font-weight: 700; }}
+        .peak-box {{ margin-top: 16px; padding: 16px; border-radius: 18px; background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%); border: 1px solid var(--border); }}
+        .peak-box p {{ margin: 0 0 8px; color: var(--muted); }}
+        .peak-box strong {{ display: block; margin-bottom: 10px; font-size: 1.05rem; }}
         @media (max-width: 900px) {{
             .stats, .grid, .meta {{ grid-template-columns: 1fr; }}
             body {{ padding: 18px; }}
@@ -313,6 +403,12 @@ def _build_html_report(report: dict[str, object]) -> str:
             </div>
             <div class='meta' style='grid-template-columns: 1fr;'>
                 <div><span>Quietest hour(s)</span><strong>{html.escape(quietest_hours)}</strong></div>
+            </div>
+            <div class='peak-box'>
+                <p>Peak 5xx window ({peak_window['window_minutes']} minutes)</p>
+                <strong>{html.escape(peak_window['start'])} to {html.escape(peak_window['end'])} - {peak_window['count']} responses</strong>
+                <p><span>Top 5xx endpoints:</span> {html.escape(peak_endpoints)}</p>
+                <p><span>Top 5xx IPs:</span> {html.escape(peak_ips)}</p>
             </div>
         </section>
 
@@ -347,6 +443,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("logfile", type=Path, help="Path to access log file")
     parser.add_argument("--top", type=int, default=10, help="Number of top endpoints to show")
     parser.add_argument(
+        "--peak-window-minutes",
+        type=int,
+        default=60,
+        help="Window size in minutes used to find the peak 5xx interval",
+    )
+    parser.add_argument(
         "--json-output",
         type=Path,
         help="Path to write the full report JSON file",
@@ -361,6 +463,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.top <= 0:
         parser.error("--top must be a positive integer")
 
+    if args.peak_window_minutes <= 0:
+        parser.error("--peak-window-minutes must be a positive integer")
+
     if not args.logfile.is_file():
         parser.error(f"Log file '{args.logfile}' does not exist or is not a file")
 
@@ -368,7 +473,7 @@ def main(argv: list[str] | None = None) -> int:
     html_output = args.html_output or args.logfile.with_name(f"{args.logfile.stem}.html")
 
     with args.logfile.open("r", encoding="utf-8") as log_file:
-        report = analyze_access_log(log_file, top_n=args.top)
+        report = analyze_access_log(log_file, top_n=args.top, peak_window_minutes=args.peak_window_minutes)
 
     _write_json_report(report, json_output)
     _write_html_report(report, html_output)

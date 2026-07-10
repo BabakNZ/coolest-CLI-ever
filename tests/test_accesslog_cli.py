@@ -40,6 +40,27 @@ class AccessLogCliTests(unittest.TestCase):
         self.assertEqual(report["quietest_hours"], ["03"])
         self.assertAlmostEqual(report["percent_4xx"], 33.33333333333333)
         self.assertAlmostEqual(report["percent_5xx"], 33.33333333333333)
+        self.assertEqual(report["peak_5xx_window"]["count"], 1)
+        self.assertEqual(report["peak_5xx_window"]["start"], "09/Jul/2026 03:00:00 +0000")
+        self.assertEqual(report["peak_5xx_window"]["end"], "09/Jul/2026 03:00:00 +0000")
+        self.assertEqual(report["peak_5xx_window"]["endpoint_breakdown"], [("/b", 1)])
+        self.assertEqual(report["peak_5xx_window"]["ip_breakdown"], [("1.1.1.1", 1)])
+
+    def test_basic_report_peak_window_groups_multiple_5xx_events(self):
+        entries = [
+            {"ip": "1.1.1.1", "endpoint": "/a", "status": "500", "timestamp": "09/Jul/2026:10:00:00 +0000"},
+            {"ip": "2.2.2.2", "endpoint": "/b", "status": "503", "timestamp": "09/Jul/2026:10:10:00 +0000"},
+            {"ip": "3.3.3.3", "endpoint": "/c", "status": "200", "timestamp": "09/Jul/2026:10:15:00 +0000"},
+            {"ip": "4.4.4.4", "endpoint": "/d", "status": "502", "timestamp": "09/Jul/2026:11:20:00 +0000"},
+        ]
+
+        report = basic_report(entries, top_n=2, broken_lines=0, peak_window_minutes=30)
+
+        self.assertEqual(report["peak_5xx_window"]["count"], 2)
+        self.assertEqual(report["peak_5xx_window"]["start"], "09/Jul/2026 10:00:00 +0000")
+        self.assertEqual(report["peak_5xx_window"]["end"], "09/Jul/2026 10:10:00 +0000")
+        self.assertEqual(report["peak_5xx_window"]["endpoint_breakdown"], [("/a", 1), ("/b", 1)])
+        self.assertEqual(report["peak_5xx_window"]["ip_breakdown"], [("1.1.1.1", 1), ("2.2.2.2", 1)])
 
     def test_main_prints_report(self):
         content = (
@@ -64,10 +85,13 @@ class AccessLogCliTests(unittest.TestCase):
             self.assertIn("Requests: 3   Unique IPs: 1   Broken lines: 1", output)
             self.assertIn("Top endpoints: /home (3)", output)
             self.assertIn("Hourly peak: 01", output)
+            self.assertIn("Peak 5xx window (60 min): 09/Jul/2026 01:01:00 +0000 -> 09/Jul/2026 01:01:00 +0000 (1 responses)", output)
             self.assertIn("Busiest hour(s): 01", output)
             self.assertIn("Quietest hour(s): 03", output)
             self.assertIn("4xx responses: 33.33%", output)
             self.assertIn("5xx responses: 33.33%", output)
+            self.assertIn("5xx window endpoints: /home (1)", output)
+            self.assertIn("5xx window IPs: 127.0.0.1 (1)", output)
             self.assertTrue(json_path.is_file())
             self.assertTrue(html_path.is_file())
 
@@ -83,6 +107,11 @@ class AccessLogCliTests(unittest.TestCase):
             self.assertEqual(report["hourly_heatmap"][1]["count"], 2)
             self.assertAlmostEqual(report["hourly_heatmap"][1]["intensity"], 1.0)
             self.assertEqual(report["hourly_heatmap"][1]["label"], "01: 2")
+            self.assertEqual(report["peak_5xx_window"]["count"], 1)
+            self.assertEqual(report["peak_5xx_window"]["start"], "09/Jul/2026 01:01:00 +0000")
+            self.assertEqual(report["peak_5xx_window"]["end"], "09/Jul/2026 01:01:00 +0000")
+            self.assertEqual(report["peak_5xx_window"]["endpoint_breakdown"], [["/home", 1]])
+            self.assertEqual(report["peak_5xx_window"]["ip_breakdown"], [["127.0.0.1", 1]])
 
             html_output = html_path.read_text(encoding="utf-8")
             self.assertIn("<h1 class='title'>Access Log Report</h1>", html_output)
@@ -91,6 +120,7 @@ class AccessLogCliTests(unittest.TestCase):
             self.assertIn("hour-cell", html_output)
             self.assertIn("01: 2", html_output)
             self.assertIn("03: 1", html_output)
+            self.assertIn("Peak 5xx window (60 minutes)", html_output)
 
 
 if __name__ == "__main__":

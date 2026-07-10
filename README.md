@@ -8,7 +8,10 @@ A clean starter CLI for parsing access logs and printing a basic usage report.
 - Generate a basic report:
   - total requests
   - number of unique IPs
-  - top N most-used endpoints (default: 10)
+  - broken lines
+  - top N most-trafficked endpoints (default: 10)
+  - percentage of 4xx responses
+  - percentage of 5xx responses
 
 ## Usage
 

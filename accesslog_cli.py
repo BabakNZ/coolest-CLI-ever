@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import time
 from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -439,6 +440,7 @@ def _write_html_report(report: dict[str, object], output_path: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    started_at = time.perf_counter()
     parser = argparse.ArgumentParser(description="Analyze access logs and print a basic report")
     parser.add_argument("logfile", type=Path, help="Path to access log file")
     parser.add_argument("--top", type=int, default=10, help="Number of top endpoints to show")
@@ -478,6 +480,7 @@ def main(argv: list[str] | None = None) -> int:
     _write_json_report(report, json_output)
     _write_html_report(report, html_output)
     print(_format_report(report))
+    print(f"Running time: {time.perf_counter() - started_at:.2f}s")
     return 0
 
 

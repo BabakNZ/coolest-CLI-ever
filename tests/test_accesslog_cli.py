@@ -92,6 +92,7 @@ class AccessLogCliTests(unittest.TestCase):
             self.assertIn("5xx responses: 33.33%", output)
             self.assertIn("5xx window endpoints: /home (1)", output)
             self.assertIn("5xx window IPs: 127.0.0.1 (1)", output)
+            self.assertRegex(output, r"Running time: \d+\.\d{2}s\s*\Z")
             self.assertTrue(json_path.is_file())
             self.assertTrue(html_path.is_file())
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 from collections import Counter
 from pathlib import Path
@@ -72,30 +73,22 @@ def _format_endpoint_summary(top_endpoints: list[tuple[str, int]], max_items: in
     return ", ".join(f"{endpoint} ({count})" for endpoint, count in top_endpoints[:max_items])
 
 
-def _build_hourly_histogram(hourly_requests: list[tuple[str, int]]) -> list[dict[str, object]]:
+def _build_hourly_heatmap(hourly_requests: list[tuple[str, int]]) -> list[dict[str, object]]:
     max_hour_count = max((count for _, count in hourly_requests), default=0)
-    histogram: list[dict[str, object]] = []
+    heatmap: list[dict[str, object]] = []
 
     for hour, count in hourly_requests:
-        percentage_of_peak = (count / max_hour_count * 100) if max_hour_count else 0.0
-        if count > 0 and max_hour_count > 0:
-            bar_length = max(1, round((count / max_hour_count) * 20))
-            bar = "#" * bar_length
-        else:
-            bar_length = 0
-            bar = ""
-
-        histogram.append(
+        intensity = (count / max_hour_count) if max_hour_count else 0.0
+        heatmap.append(
             {
                 "hour": hour,
                 "count": count,
-                "bar_length": bar_length,
-                "bar": bar,
-                "percentage_of_peak": percentage_of_peak,
+                "intensity": intensity,
+                "label": f"{hour}: {count}",
             }
         )
 
-    return histogram
+    return heatmap
 
 def parse_access_log(lines: Iterable[str]) -> Iterator[dict[str, str]]:
     for line in lines:
@@ -149,7 +142,7 @@ def basic_report(
         busiest_hours = []
         quietest_hours = []
 
-    hourly_histogram = _build_hourly_histogram(hourly_requests)
+    hourly_heatmap = _build_hourly_heatmap(hourly_requests)
 
     return {
         "total_requests": total_requests,
@@ -159,7 +152,7 @@ def basic_report(
         "percent_4xx": percent_4xx,
         "percent_5xx": percent_5xx,
         "hourly_requests": hourly_requests,
-        "hourly_histogram": hourly_histogram,
+        "hourly_heatmap": hourly_heatmap,
         "busiest_hours": busiest_hours,
         "quietest_hours": quietest_hours,
     }
@@ -200,6 +193,155 @@ def _write_json_report(report: dict[str, object], output_path: Path) -> None:
         json.dump(report, json_file, indent=2)
 
 
+def _format_percentage(value: float) -> str:
+    return f"{value:.2f}%"
+
+
+def _build_html_report(report: dict[str, object]) -> str:
+    top_endpoints = report["top_endpoints"]
+    hourly_heatmap = report["hourly_heatmap"]
+    busiest_hours = ", ".join(report["busiest_hours"]) if report["busiest_hours"] else "none"
+    quietest_hours = ", ".join(report["quietest_hours"]) if report["quietest_hours"] else "none"
+
+    heatmap_cells = []
+    for item in hourly_heatmap:
+        hour = html.escape(item["hour"])
+        count = item["count"]
+        intensity = item["intensity"]
+        heatmap_cells.append(
+            f"<div class='hour-cell' style='--intensity:{intensity:.4f}' title='{hour}: {count}'><span class='hour-label'>{hour}</span><strong>{count}</strong></div>"
+        )
+
+    top_endpoint_rows = []
+    for endpoint, count in top_endpoints:
+        top_endpoint_rows.append(
+            f"<li><span class='endpoint'>{html.escape(endpoint)}</span><span class='count'>{count}</span></li>"
+        )
+
+    template = f"""<!doctype html>
+<html lang='en'>
+<head>
+    <meta charset='utf-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1'>
+    <title>Access Log Report</title>
+    <style>
+        :root {{
+            color-scheme: light;
+            --bg: #f5f7fb;
+            --panel: #ffffff;
+            --text: #1e293b;
+            --muted: #64748b;
+            --accent: #2563eb;
+            --accent-soft: #dbeafe;
+            --border: #dbe3ee;
+            --bar: linear-gradient(90deg, #2563eb, #60a5fa);
+        }}
+        * {{ box-sizing: border-box; }}
+        body {{
+            margin: 0;
+            font-family: Inter, Segoe UI, Arial, sans-serif;
+            background: radial-gradient(circle at top, #eef4ff 0, var(--bg) 45%, #eef2f7 100%);
+            color: var(--text);
+            padding: 32px;
+        }}
+        .wrap {{ max-width: 1200px; margin: 0 auto; }}
+        .hero {{
+            background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 28px;
+            box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+            margin-bottom: 24px;
+        }}
+        .title {{ margin: 0; font-size: 2rem; letter-spacing: -0.03em; }}
+        .subtitle {{ margin: 8px 0 0; color: var(--muted); }}
+        .stats {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 24px 0; }}
+        .stat {{ background: var(--panel); border: 1px solid var(--border); border-radius: 18px; padding: 18px; }}
+        .stat-label {{ color: var(--muted); font-size: 0.875rem; }}
+        .stat-value {{ font-size: 1.8rem; font-weight: 700; margin-top: 6px; }}
+        .grid {{ display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 20px; }}
+        .card {{ background: var(--panel); border: 1px solid var(--border); border-radius: 22px; padding: 22px; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05); }}
+        .card h2 {{ margin: 0 0 16px; font-size: 1.15rem; }}
+        .meta {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }}
+        .meta div {{ background: #f8fbff; border: 1px solid var(--border); border-radius: 16px; padding: 14px; }}
+        .meta span {{ display: block; color: var(--muted); font-size: 0.82rem; margin-bottom: 4px; }}
+        .meta strong {{ font-size: 1.05rem; }}
+        .heatmap {{
+            display: grid;
+            grid-template-columns: repeat(6, minmax(0, 1fr));
+            gap: 12px;
+        }}
+        .hour-cell {{
+            min-height: 90px;
+            padding: 14px;
+            border-radius: 18px;
+            border: 1px solid rgba(37, 99, 235, 0.12);
+            background: color-mix(in srgb, #ffffff 20%, #2563eb calc(var(--intensity) * 80%));
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            box-shadow: 0 10px 25px rgba(15, 23, 42, calc(0.03 + (var(--intensity) * 0.10)));
+        }}
+        .hour-label {{ color: var(--muted); font-size: 0.82rem; letter-spacing: 0.04em; text-transform: uppercase; }}
+        .hour-cell strong {{ font-size: 1.4rem; color: var(--text); }}
+        .endpoints {{ list-style: none; padding: 0; margin: 0; }}
+        .endpoints li {{ display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }}
+        .endpoints li:last-child {{ border-bottom: 0; }}
+        .endpoint {{ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+        .count {{ color: var(--accent); font-weight: 700; }}
+        @media (max-width: 900px) {{
+            .stats, .grid, .meta {{ grid-template-columns: 1fr; }}
+            body {{ padding: 18px; }}
+        }}
+    </style>
+</head>
+<body>
+    <div class='wrap'>
+        <section class='hero'>
+            <h1 class='title'>Access Log Report</h1>
+            <p class='subtitle'>A compact view of requests, unique clients, broken lines, and hourly activity.</p>
+            <div class='stats'>
+                <div class='stat'><div class='stat-label'>Requests</div><div class='stat-value'>{report['total_requests']}</div></div>
+                <div class='stat'><div class='stat-label'>Unique IPs</div><div class='stat-value'>{report['unique_ips']}</div></div>
+                <div class='stat'><div class='stat-label'>Broken lines</div><div class='stat-value'>{report['broken_lines']}</div></div>
+                <div class='stat'><div class='stat-label'>Hourly peak</div><div class='stat-value'>{html.escape(report['busiest_hours'][0] if report['busiest_hours'] else 'none')}</div></div>
+            </div>
+            <div class='meta'>
+                <div><span>4xx responses</span><strong>{_format_percentage(report['percent_4xx'])}</strong></div>
+                <div><span>5xx responses</span><strong>{_format_percentage(report['percent_5xx'])}</strong></div>
+                <div><span>Busiest hour(s)</span><strong>{html.escape(busiest_hours)}</strong></div>
+            </div>
+            <div class='meta' style='grid-template-columns: 1fr;'>
+                <div><span>Quietest hour(s)</span><strong>{html.escape(quietest_hours)}</strong></div>
+            </div>
+        </section>
+
+        <section class='grid'>
+            <div class='card'>
+                <h2>Hourly Activity</h2>
+                <div class='heatmap'>
+                    {''.join(heatmap_cells)}
+                </div>
+            </div>
+            <div class='card'>
+                <h2>Top Endpoints</h2>
+                <ul class='endpoints'>
+                    {''.join(top_endpoint_rows) if top_endpoint_rows else '<li><span>No endpoints found</span><span class="count">0</span></li>'}
+                </ul>
+            </div>
+        </section>
+    </div>
+</body>
+</html>"""
+
+    return template
+
+
+def _write_html_report(report: dict[str, object], output_path: Path) -> None:
+    with output_path.open("w", encoding="utf-8") as html_file:
+        html_file.write(_build_html_report(report))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Analyze access logs and print a basic report")
     parser.add_argument("logfile", type=Path, help="Path to access log file")
@@ -208,6 +350,11 @@ def main(argv: list[str] | None = None) -> int:
         "--json-output",
         type=Path,
         help="Path to write the full report JSON file",
+    )
+    parser.add_argument(
+        "--html-output",
+        type=Path,
+        help="Path to write a presentable HTML report",
     )
     args = parser.parse_args(argv)
 
@@ -218,11 +365,13 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"Log file '{args.logfile}' does not exist or is not a file")
 
     json_output = args.json_output or args.logfile.with_name(f"{args.logfile.name}.json")
+    html_output = args.html_output or args.logfile.with_name(f"{args.logfile.stem}.html")
 
     with args.logfile.open("r", encoding="utf-8") as log_file:
         report = analyze_access_log(log_file, top_n=args.top)
 
     _write_json_report(report, json_output)
+    _write_html_report(report, html_output)
     print(_format_report(report))
     return 0
 

@@ -52,6 +52,7 @@ class AccessLogCliTests(unittest.TestCase):
             log_path = Path(tmp_dir) / "access.log"
             log_path.write_text(content, encoding="utf-8")
             json_path = Path(tmp_dir) / "access.log.json"
+            html_path = Path(tmp_dir) / "access.html"
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -68,6 +69,7 @@ class AccessLogCliTests(unittest.TestCase):
             self.assertIn("4xx responses: 33.33%", output)
             self.assertIn("5xx responses: 33.33%", output)
             self.assertTrue(json_path.is_file())
+            self.assertTrue(html_path.is_file())
 
             report = json.loads(json_path.read_text(encoding="utf-8"))
             self.assertEqual(report["total_requests"], 3)
@@ -77,11 +79,18 @@ class AccessLogCliTests(unittest.TestCase):
             self.assertEqual(report["busiest_hours"], ["01"])
             self.assertEqual(report["quietest_hours"], ["03"])
             self.assertEqual(report["hourly_requests"][1], ["01", 2])
-            self.assertEqual(report["hourly_histogram"][1]["hour"], "01")
-            self.assertEqual(report["hourly_histogram"][1]["count"], 2)
-            self.assertGreater(report["hourly_histogram"][1]["bar_length"], 0)
-            self.assertEqual(report["hourly_histogram"][1]["bar"], "####################")
-            self.assertAlmostEqual(report["hourly_histogram"][1]["percentage_of_peak"], 100.0)
+            self.assertEqual(report["hourly_heatmap"][1]["hour"], "01")
+            self.assertEqual(report["hourly_heatmap"][1]["count"], 2)
+            self.assertAlmostEqual(report["hourly_heatmap"][1]["intensity"], 1.0)
+            self.assertEqual(report["hourly_heatmap"][1]["label"], "01: 2")
+
+            html_output = html_path.read_text(encoding="utf-8")
+            self.assertIn("<h1 class='title'>Access Log Report</h1>", html_output)
+            self.assertIn("<h2>Hourly Activity</h2>", html_output)
+            self.assertIn("<h2>Top Endpoints</h2>", html_output)
+            self.assertIn("hour-cell", html_output)
+            self.assertIn("01: 2", html_output)
+            self.assertIn("03: 1", html_output)
 
 
 if __name__ == "__main__":

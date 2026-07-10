@@ -48,6 +48,21 @@ def _parse_access_log_line(line: str) -> dict[str, str] | None:
         "size": size,
     }
 
+
+def _extract_hour(timestamp: str) -> str | None:
+    if ":" not in timestamp:
+        return None
+
+    parts = timestamp.split(":", 2)
+    if len(parts) < 2:
+        return None
+
+    hour = parts[1]
+    if len(hour) != 2 or not hour.isdigit():
+        return None
+
+    return hour
+
 def parse_access_log(lines: Iterable[str]) -> Iterator[dict[str, str]]:
     for line in lines:
         entry = _parse_access_log_line(line)
@@ -65,6 +80,7 @@ def basic_report(
     total_requests = 0
     unique_ips: set[str] = set()
     endpoint_counter: Counter[str] = Counter()
+    hourly_counter: Counter[str] = Counter()
     status_4xx = 0
     status_5xx = 0
     for entry in entries:
@@ -72,6 +88,9 @@ def basic_report(
         unique_ips.add(entry["ip"])
         if entry["endpoint"]:
             endpoint_counter[entry["endpoint"]] += 1
+        hour = _extract_hour(entry.get("timestamp", ""))
+        if hour is not None:
+            hourly_counter[hour] += 1
         status_code = entry.get("status", "")
         if status_code.startswith("4"):
             status_4xx += 1
@@ -85,6 +104,17 @@ def basic_report(
         percent_4xx = 0.0
         percent_5xx = 0.0
 
+    hourly_requests = [(f"{hour:02d}", hourly_counter.get(f"{hour:02d}", 0)) for hour in range(24)]
+    non_zero_hours = [(hour, count) for hour, count in hourly_requests if count > 0]
+    if non_zero_hours:
+        max_hour_count = max(count for _, count in non_zero_hours)
+        min_hour_count = min(count for _, count in non_zero_hours)
+        busiest_hours = [hour for hour, count in non_zero_hours if count == max_hour_count]
+        quietest_hours = [hour for hour, count in non_zero_hours if count == min_hour_count]
+    else:
+        busiest_hours = []
+        quietest_hours = []
+
     return {
         "total_requests": total_requests,
         "unique_ips": len(unique_ips),
@@ -92,6 +122,9 @@ def basic_report(
         "broken_lines": broken_lines,
         "percent_4xx": percent_4xx,
         "percent_5xx": percent_5xx,
+        "hourly_requests": hourly_requests,
+        "busiest_hours": busiest_hours,
+        "quietest_hours": quietest_hours,
     }
 
 
@@ -123,6 +156,32 @@ def _format_report(report: dict[str, object]) -> str:
             lines.append(f"- {endpoint}: {count}")
     else:
         lines.append("- No endpoints found")
+    lines.append("Requests by hour (scaled to 20 blocks):")
+    hourly_requests = report["hourly_requests"]
+    max_hour_count = max((count for _, count in hourly_requests), default=0)
+    for hour, count in report["hourly_requests"]:
+        if count > 0 and max_hour_count > 0:
+            bar_length = max(1, round((count / max_hour_count) * 20))
+        else:
+            bar_length = 0
+        bar = "█" * bar_length
+        lines.append(f"- {hour}: {bar} ({count})")
+    if report["busiest_hours"]:
+        busiest = ", ".join(report["busiest_hours"])
+        busiest_count = next(
+            count for hour, count in hourly_requests if hour in report["busiest_hours"]
+        )
+        lines.append(f"Busiest hour(s): {busiest} ({busiest_count})")
+    else:
+        lines.append("Busiest hour(s): none")
+    if report["quietest_hours"]:
+        quietest = ", ".join(report["quietest_hours"])
+        quietest_count = next(
+            count for hour, count in hourly_requests if hour in report["quietest_hours"]
+        )
+        lines.append(f"Quietest hour(s): {quietest} ({quietest_count})")
+    else:
+        lines.append("Quietest hour(s): none")
     lines.append(f"4xx responses: {report['percent_4xx']:.2f}%")
     lines.append(f"5xx responses: {report['percent_5xx']:.2f}%")
     return "\n".join(lines)

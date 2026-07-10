@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from collections import Counter
 from pathlib import Path
 from typing import Iterable, Iterator
@@ -62,6 +63,13 @@ def _extract_hour(timestamp: str) -> str | None:
         return None
 
     return hour
+
+
+def _format_endpoint_summary(top_endpoints: list[tuple[str, int]], max_items: int = 3) -> str:
+    if not top_endpoints:
+        return "none"
+
+    return ", ".join(f"{endpoint} ({count})" for endpoint, count in top_endpoints[:max_items])
 
 def parse_access_log(lines: Iterable[str]) -> Iterator[dict[str, str]]:
     for line in lines:
@@ -148,49 +156,29 @@ def _format_report(report: dict[str, object]) -> str:
         f"Total requests: {report['total_requests']}",
         f"Unique IPs: {report['unique_ips']}",
         f"Broken lines: {report['broken_lines']}",
-        "Top endpoints:",
+        f"Top endpoints: {_format_endpoint_summary(report['top_endpoints'])}",
+        f"Busiest hour(s): {', '.join(report['busiest_hours']) if report['busiest_hours'] else 'none'}",
+        f"Quietest hour(s): {', '.join(report['quietest_hours']) if report['quietest_hours'] else 'none'}",
+        f"4xx responses: {report['percent_4xx']:.2f}%",
+        f"5xx responses: {report['percent_5xx']:.2f}%",
     ]
-    top_endpoints = report["top_endpoints"]
-    if top_endpoints:
-        for endpoint, count in top_endpoints:
-            lines.append(f"- {endpoint}: {count}")
-    else:
-        lines.append("- No endpoints found")
-    lines.append("Requests by hour (scaled to 20 blocks):")
-    hourly_requests = report["hourly_requests"]
-    max_hour_count = max((count for _, count in hourly_requests), default=0)
-    for hour, count in report["hourly_requests"]:
-        if count > 0 and max_hour_count > 0:
-            bar_length = max(1, round((count / max_hour_count) * 20))
-        else:
-            bar_length = 0
-        bar = "█" * bar_length
-        lines.append(f"- {hour}: {bar} ({count})")
-    if report["busiest_hours"]:
-        busiest = ", ".join(report["busiest_hours"])
-        busiest_count = next(
-            count for hour, count in hourly_requests if hour in report["busiest_hours"]
-        )
-        lines.append(f"Busiest hour(s): {busiest} ({busiest_count})")
-    else:
-        lines.append("Busiest hour(s): none")
-    if report["quietest_hours"]:
-        quietest = ", ".join(report["quietest_hours"])
-        quietest_count = next(
-            count for hour, count in hourly_requests if hour in report["quietest_hours"]
-        )
-        lines.append(f"Quietest hour(s): {quietest} ({quietest_count})")
-    else:
-        lines.append("Quietest hour(s): none")
-    lines.append(f"4xx responses: {report['percent_4xx']:.2f}%")
-    lines.append(f"5xx responses: {report['percent_5xx']:.2f}%")
     return "\n".join(lines)
+
+
+def _write_json_report(report: dict[str, object], output_path: Path) -> None:
+    with output_path.open("w", encoding="utf-8") as json_file:
+        json.dump(report, json_file, indent=2)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Analyze access logs and print a basic report")
     parser.add_argument("logfile", type=Path, help="Path to access log file")
     parser.add_argument("--top", type=int, default=10, help="Number of top endpoints to show")
+    parser.add_argument(
+        "--json-output",
+        type=Path,
+        help="Path to write the full report JSON file",
+    )
     args = parser.parse_args(argv)
 
     if args.top <= 0:
@@ -198,9 +186,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.logfile.is_file():
         parser.error(f"Log file '{args.logfile}' does not exist or is not a file")
-    
+
+    json_output = args.json_output or args.logfile.with_name(f"{args.logfile.name}.json")
+
     with args.logfile.open("r", encoding="utf-8") as log_file:
-        print(_format_report(analyze_access_log(log_file, top_n=args.top)))
+        report = analyze_access_log(log_file, top_n=args.top)
+
+    _write_json_report(report, json_output)
+    print(_format_report(report))
     return 0
 
 

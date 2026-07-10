@@ -1,4 +1,5 @@
 import io
+import json
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -50,24 +51,32 @@ class AccessLogCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             log_path = Path(tmp_dir) / "access.log"
             log_path.write_text(content, encoding="utf-8")
+            json_path = Path(tmp_dir) / "access.log.json"
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):
                 exit_code = main([str(log_path), "--top", "1"])
 
-        output = stdout.getvalue()
-        self.assertEqual(exit_code, 0)
-        self.assertIn("Total requests: 3", output)
-        self.assertIn("Unique IPs: 1", output)
-        self.assertIn("Broken lines: 1", output)
-        self.assertIn("- /home: 3", output)
-        self.assertIn("Requests by hour (scaled to 20 blocks):", output)
-        self.assertIn("- 01: ████████████████████ (2)", output)
-        self.assertIn("- 03: ██████████ (1)", output)
-        self.assertIn("Busiest hour(s): 01 (2)", output)
-        self.assertIn("Quietest hour(s): 03 (1)", output)
-        self.assertIn("4xx responses: 33.33%", output)
-        self.assertIn("5xx responses: 33.33%", output)
+            output = stdout.getvalue()
+            self.assertEqual(exit_code, 0)
+            self.assertIn("Total requests: 3", output)
+            self.assertIn("Unique IPs: 1", output)
+            self.assertIn("Broken lines: 1", output)
+            self.assertIn("Top endpoints: /home (3)", output)
+            self.assertIn("Busiest hour(s): 01", output)
+            self.assertIn("Quietest hour(s): 03", output)
+            self.assertIn("4xx responses: 33.33%", output)
+            self.assertIn("5xx responses: 33.33%", output)
+            self.assertTrue(json_path.is_file())
+
+            report = json.loads(json_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["total_requests"], 3)
+            self.assertEqual(report["unique_ips"], 1)
+            self.assertEqual(report["broken_lines"], 1)
+            self.assertEqual(report["top_endpoints"], [["/home", 3]])
+            self.assertEqual(report["busiest_hours"], ["01"])
+            self.assertEqual(report["quietest_hours"], ["03"])
+            self.assertEqual(report["hourly_requests"][1], ["01", 2])
 
 
 if __name__ == "__main__":

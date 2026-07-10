@@ -13,7 +13,7 @@ A clean starter CLI for parsing access logs and printing a basic usage report.
   - percentage of 4xx responses
   - percentage of 5xx responses
 - Print a short summary to the terminal
-- Write the full report to a JSON file next to the log by default
+- Write the full report, including a readable ASCII hourly histogram, to a JSON file next to the log by default
 
 ## Usage
 

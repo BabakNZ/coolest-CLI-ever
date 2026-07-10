@@ -71,6 +71,32 @@ def _format_endpoint_summary(top_endpoints: list[tuple[str, int]], max_items: in
 
     return ", ".join(f"{endpoint} ({count})" for endpoint, count in top_endpoints[:max_items])
 
+
+def _build_hourly_histogram(hourly_requests: list[tuple[str, int]]) -> list[dict[str, object]]:
+    max_hour_count = max((count for _, count in hourly_requests), default=0)
+    histogram: list[dict[str, object]] = []
+
+    for hour, count in hourly_requests:
+        percentage_of_peak = (count / max_hour_count * 100) if max_hour_count else 0.0
+        if count > 0 and max_hour_count > 0:
+            bar_length = max(1, round((count / max_hour_count) * 20))
+            bar = "#" * bar_length
+        else:
+            bar_length = 0
+            bar = ""
+
+        histogram.append(
+            {
+                "hour": hour,
+                "count": count,
+                "bar_length": bar_length,
+                "bar": bar,
+                "percentage_of_peak": percentage_of_peak,
+            }
+        )
+
+    return histogram
+
 def parse_access_log(lines: Iterable[str]) -> Iterator[dict[str, str]]:
     for line in lines:
         entry = _parse_access_log_line(line)
@@ -123,6 +149,8 @@ def basic_report(
         busiest_hours = []
         quietest_hours = []
 
+    hourly_histogram = _build_hourly_histogram(hourly_requests)
+
     return {
         "total_requests": total_requests,
         "unique_ips": len(unique_ips),
@@ -131,6 +159,7 @@ def basic_report(
         "percent_4xx": percent_4xx,
         "percent_5xx": percent_5xx,
         "hourly_requests": hourly_requests,
+        "hourly_histogram": hourly_histogram,
         "busiest_hours": busiest_hours,
         "quietest_hours": quietest_hours,
     }
@@ -153,15 +182,16 @@ def analyze_access_log(lines: Iterable[str], top_n: int = 10) -> dict[str, objec
 
 def _format_report(report: dict[str, object]) -> str:
     lines = [
-        f"Total requests: {report['total_requests']}",
-        f"Unique IPs: {report['unique_ips']}",
-        f"Broken lines: {report['broken_lines']}",
+        "Access Log Summary",
+        "==================",
+        f"Requests: {report['total_requests']}   Unique IPs: {report['unique_ips']}   Broken lines: {report['broken_lines']}",
         f"Top endpoints: {_format_endpoint_summary(report['top_endpoints'])}",
-        f"Busiest hour(s): {', '.join(report['busiest_hours']) if report['busiest_hours'] else 'none'}",
-        f"Quietest hour(s): {', '.join(report['quietest_hours']) if report['quietest_hours'] else 'none'}",
-        f"4xx responses: {report['percent_4xx']:.2f}%",
-        f"5xx responses: {report['percent_5xx']:.2f}%",
+        f"Hourly peak: {report['busiest_hours'][0] if report['busiest_hours'] else 'none'}",
     ]
+    lines.append(f"Busiest hour(s): {', '.join(report['busiest_hours']) if report['busiest_hours'] else 'none'}")
+    lines.append(f"Quietest hour(s): {', '.join(report['quietest_hours']) if report['quietest_hours'] else 'none'}")
+    lines.append(f"4xx responses: {report['percent_4xx']:.2f}%")
+    lines.append(f"5xx responses: {report['percent_5xx']:.2f}%")
     return "\n".join(lines)
 
 

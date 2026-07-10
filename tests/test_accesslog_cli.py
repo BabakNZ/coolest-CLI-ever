@@ -59,10 +59,10 @@ class AccessLogCliTests(unittest.TestCase):
 
             output = stdout.getvalue()
             self.assertEqual(exit_code, 0)
-            self.assertIn("Total requests: 3", output)
-            self.assertIn("Unique IPs: 1", output)
-            self.assertIn("Broken lines: 1", output)
+            self.assertIn("Access Log Summary", output)
+            self.assertIn("Requests: 3   Unique IPs: 1   Broken lines: 1", output)
             self.assertIn("Top endpoints: /home (3)", output)
+            self.assertIn("Hourly peak: 01", output)
             self.assertIn("Busiest hour(s): 01", output)
             self.assertIn("Quietest hour(s): 03", output)
             self.assertIn("4xx responses: 33.33%", output)
@@ -77,6 +77,11 @@ class AccessLogCliTests(unittest.TestCase):
             self.assertEqual(report["busiest_hours"], ["01"])
             self.assertEqual(report["quietest_hours"], ["03"])
             self.assertEqual(report["hourly_requests"][1], ["01", 2])
+            self.assertEqual(report["hourly_histogram"][1]["hour"], "01")
+            self.assertEqual(report["hourly_histogram"][1]["count"], 2)
+            self.assertGreater(report["hourly_histogram"][1]["bar_length"], 0)
+            self.assertEqual(report["hourly_histogram"][1]["bar"], "####################")
+            self.assertAlmostEqual(report["hourly_histogram"][1]["percentage_of_peak"], 100.0)
 
 
 if __name__ == "__main__":

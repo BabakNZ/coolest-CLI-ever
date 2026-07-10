@@ -1,54 +1,69 @@
-"""Simple CLI and helpers for access log analysis."""
-
 from __future__ import annotations
 
 import argparse
-import re
 from collections import Counter
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Iterator
 
-_LOG_PATTERN = re.compile(
-    r'(?P<ip>\S+)\s+\S+\s+\S+\s+\[(?P<time>[^\]]+)\]\s+"(?P<request>[^"]*)"\s+(?P<status>\d{3})\s+(?P<size>\S+)'
-)
-
-
-def parse_access_log(lines: Iterable[str]) -> list[dict[str, str]]:
-    """Parse access-log lines in common log format.
-
-    Returns only valid parsed entries and skips malformed lines.
-    """
-
-    parsed: list[dict[str, str]] = []
+def parse_access_log(lines: Iterable[str]) -> Iterator[dict[str, str]]:
     for line in lines:
-        match = _LOG_PATTERN.match(line.strip())
-        if not match:
+        line = line.strip()
+        if not line:
             continue
-        request = match.group("request")
+
+        parts = line.split('"', 2)
+        if len(parts) < 3:
+            continue
+
+        before_request, request, after_request = parts
+        before_request_parts = before_request.split()
+        if not before_request_parts:
+            continue
+
+        ip = before_request_parts[0]
+        time_start = before_request.find("[")
+        time_end = before_request.find("]", time_start + 1)
+        if time_start == -1 or time_end == -1:
+            continue
+
+        response_parts = after_request.strip().split()
+        if len(response_parts) < 2:
+            continue
+
+        status, size = response_parts[0], response_parts[1]
+        if len(status) != 3 or not status.isdigit():
+            continue
+
         endpoint = ""
-        parts = request.split()
-        if len(parts) >= 2:
-            endpoint = parts[1]
-        parsed.append(
-            {
-                "ip": match.group("ip"),
-                "timestamp": match.group("time"),
-                "request": request,
-                "endpoint": endpoint,
-                "status": match.group("status"),
-                "size": match.group("size"),
-            }
-        )
-    return parsed
+        request_parts = request.split()
+        if len(request_parts) >= 2:
+            endpoint = request_parts[1]
+
+        yield {
+            "ip": ip,
+            "timestamp": before_request[time_start + 1 : time_end],
+            "request": request,
+            "endpoint": endpoint,
+            "status": status,
+            "size": size,
+        }
 
 
-def basic_report(entries: list[dict[str, str]], top_n: int = 10) -> dict[str, object]:
+def basic_report(entries: Iterable[dict[str, str]], top_n: int = 10) -> dict[str, object]:
     """Generate a basic report from parsed entries."""
 
-    endpoint_counter = Counter(entry["endpoint"] for entry in entries if entry["endpoint"])
+    total_requests = 0
+    unique_ips: set[str] = set()
+    endpoint_counter: Counter[str] = Counter()
+    for entry in entries:
+        total_requests += 1
+        unique_ips.add(entry["ip"])
+        if entry["endpoint"]:
+            endpoint_counter[entry["endpoint"]] += 1
+
     return {
-        "total_requests": len(entries),
-        "unique_ips": len({entry["ip"] for entry in entries}),
+        "total_requests": total_requests,
+        "unique_ips": len(unique_ips),
         "top_endpoints": endpoint_counter.most_common(top_n),
     }
 
@@ -79,10 +94,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.top <= 0:
         parser.error("--top must be a positive integer")
 
+    if not args.logfile.is_file():
+        parser.error(f"Log file '{args.logfile}' does not exist or is not a file")
+    
     with args.logfile.open("r", encoding="utf-8") as log_file:
-        entries = parse_access_log(log_file)
-
-    print(_format_report(basic_report(entries, top_n=args.top)))
+        print(_format_report(basic_report(parse_access_log(log_file), top_n=args.top)))
     return 0
 
 

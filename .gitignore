@@ -1,3 +1,5 @@
 __pycache__/
 *.pyc
 access.log
+access.log.*
+*.html

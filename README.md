@@ -1,8 +1,13 @@
 # coolest-CLI-ever
 
+[![Status](https://img.shields.io/badge/status-active-success)](https://github.com/BabakNZ/coolest-CLI-ever)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+
 A clean, production-ready CLI tool for parsing access logs and generating comprehensive usage reports. This utility provides actionable insights from web server logs with both terminal and formatted report outputs.
 
-## Features
+---
+
+## ✨ Features
 
 - **Log Parsing**: Parse access logs in the common log format (Apache/Nginx)
 - **Comprehensive Analysis**:
@@ -18,7 +23,9 @@ A clean, production-ready CLI tool for parsing access logs and generating compre
   - JSON report for programmatic consumption
   - Interactive HTML report with visual heatmaps
 
-## Quick Start
+---
+
+## 🚀 Quick Start
 
 ### Basic Usage
 
@@ -52,7 +59,9 @@ Configure the 5xx peak detection time window (in minutes):
 python accesslog_cli.py /path/to/access.log --peak-window-minutes 60
 ```
 
-## Libraries Used
+---
+
+## 🗂️ Libraries Used
 
 This project utilizes Python's standard library exclusively for maximum portability and zero external dependencies:
 
@@ -66,7 +75,9 @@ This project utilizes Python's standard library exclusively for maximum portabil
 | **html** | Safe HTML escaping to prevent injection vulnerabilities |
 | **typing** | Type hints for better code clarity and IDE support |
 
-## Design Highlights
+---
+
+## ✏️ Design Highlights
 
 - **No External Dependencies**: Uses only Python standard library for reliability and ease of deployment
 - **Efficient Algorithms**: Sliding window technique for O(n) 5xx peak detection without nested loops
